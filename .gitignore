@@ -1,0 +1,25 @@
+# Go
+/bin/
+/dist/
+*.test
+coverage.out
+
+# Frontend
+node_modules/
+web/dist/
+web/.vite/
+
+# Local state and secrets
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+!.env.example
+wallet-backups/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
