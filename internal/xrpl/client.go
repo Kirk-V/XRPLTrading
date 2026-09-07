@@ -3,7 +3,7 @@ package xrpl
 import (
 	"context"
 
-	"github.com/yourname/xrpltrading/internal/domain"
+	"github.com/Kirk-V/XRPLTrading/internal/domain"
 )
 
 // ReadClient is the narrow, read-only XRPL boundary used by the application layer.
@@ -12,6 +12,7 @@ type ReadClient interface {
 	Connect(ctx context.Context) error
 	BookOffers(ctx context.Context, pair domain.Pair, limit int) ([]Offer, error)
 	SubscribeBook(ctx context.Context, pair domain.Pair) (<-chan BookUpdate, error)
+	SubscribeLedger(ctx context.Context) (<-chan LedgerUpdate, error)
 }
 
 type Offer struct {
@@ -24,4 +25,12 @@ type Offer struct {
 type BookUpdate struct {
 	LedgerIndex uint32  `json:"ledger_index"`
 	Offers      []Offer `json:"offers"`
+}
+
+// LedgerUpdate represents a validated ledgerClosed notification.
+type LedgerUpdate struct {
+	LedgerIndex uint32 `json:"ledger_index"`
+	LedgerHash  string `json:"ledger_hash"`
+	LedgerTime  uint32 `json:"ledger_time"`
+	TxnCount    uint32 `json:"txn_count"`
 }

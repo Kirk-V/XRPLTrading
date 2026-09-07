@@ -32,11 +32,11 @@
 
 ## Responsibilities
 
-The current implementation has completed the initial domain/configuration layer, a JSON-RPC `book_offers` client, a WebSocket book subscription client, and an XRP/token pair-discovery component. The application service and UI are still pending.
+The current implementation has completed the initial domain/configuration layer, a JSON-RPC `book_offers` client, WebSocket book and validated-ledger subscription clients, an XRP/token pair-discovery component, reconnecting book/ledger ingestion services, a durable JSONL event journal, versioned Go read models, and a fixture-backed React/TypeScript market screen. The application service and live UI transport are still pending.
 
 ### Frontend
 
-The frontend is presentation and interaction only. It receives normalized read models and subscribes to typed events. It never holds a seed, constructs an unsigned transaction from untrusted display text, or treats an RPC acknowledgment as finality.
+The frontend is presentation and interaction only. The current screen uses fixture data; the intended transport is a local typed API/event stream. It never holds a seed, constructs an unsigned transaction from untrusted display text, or treats an RPC acknowledgment as finality.
 
 ### Application service
 
@@ -60,7 +60,7 @@ Owns quote validation, OfferCreate/OfferCancel construction, fee and price bound
 
 ### Persistence
 
-SQLite is the initial embedded store. Suggested tables include `networks`, `assets`, `pairs`, `market_events`, `candles`, `wallets`, `encrypted_secrets`, `orders`, `transactions`, and `schema_migrations`. Use migrations and WAL mode; keep raw protocol payloads only where useful for replay/debugging and redact sensitive data.
+The current persistence primitive is an append-only `storage.FileJournal` using local JSONL, with sequence cursors, flush-on-append, and replay. SQLite remains the planned embedded aggregate store. Suggested tables include `networks`, `assets`, `pairs`, `market_events`, `candles`, `wallets`, `encrypted_secrets`, `orders`, `transactions`, and `schema_migrations`. Use migrations and WAL mode when SQLite is introduced; keep raw protocol payloads only where useful for replay/debugging and redact sensitive data.
 
 ## Realtime data flow
 
@@ -74,7 +74,7 @@ SQLite is the initial embedded store. Suggested tables include `networks`, `asse
 
 The pair watcher uses the same ingestion pipeline, filtering for newly observed XRP/token books and emitting a `PairDiscovered` event. It must be throttled, deduplicated, and observable; it must never place orders.
 
-The current `PairDiscovery` component accepts XRPL book-change asset labels such as `XRP_drops` and `rIssuer/USD`, canonicalizes the pair to XRP as base, and deduplicates reverse observations. Continuous stream ingestion and reconnection/backfill remain the next implementation task.
+The current `PairDiscovery` component accepts XRPL book-change asset labels such as `XRP_drops` and `rIssuer/USD`, canonicalizes the pair to XRP as base, and deduplicates reverse observations. `market.Ingestor` owns a book stream, emits an initial normalized snapshot, forwards updates, and reloads a snapshot after disconnect before publishing recovered data. `market.LedgerIngestor` provides the validated-ledger cursor with the same reconnect behavior. Both can persist normalized events through the append-only `storage.FileJournal`, which assigns durable sequence cursors and supports replay after restart. Ledger gap detection and SQLite-backed aggregate storage remain future work.
 
 ## Transaction flow
 
@@ -101,6 +101,8 @@ Expose a versioned local API with request/response types generated or shared bet
 
 Keep the API transport replaceable: desktop bindings initially, local HTTP/WebSocket in browser development mode, and a future CLI/client without changing domain services.
 
+The initial Go read models live under `api/v1`. They represent financial quantities as decimal strings, keep issuer-qualified assets in every market-facing model, and use explicit order and transaction lifecycle states. The Vite web workspace currently mirrors the read-only market models in `web/src/api.ts`; it will switch to the local API transport when that boundary is exposed.
+
 ## Local development
 
 From the repository root:
@@ -110,6 +112,16 @@ go test ./...
 go run ./cmd/trader
 go build -o bin/trader ./cmd/trader
 ```
+
+For the fixture-backed web screen:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+The web workspace also supports `npm run build`, `npm run lint`, and `npm run format`.
 
 The default configuration targets XRPL testnet and read-only mode. The live client is currently a package-level integration boundary; it is not exposed as a trading command and does not handle wallet secrets.
 

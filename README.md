@@ -2,7 +2,7 @@
 
 A local-first trading application for the XRP Ledger (XRPL). The initial scope is finding and monitoring XRP-to-issued-token markets, viewing live market data and charts, managing wallets and funds, executing trades, and creating/canceling limit offers.
 
-The first read-only XRPL adapter and XRP/token pair-discovery component are now implemented. The implementation is designed for Linux, Windows, and macOS, with testnet support required before any mainnet trading is enabled.
+The read-only XRPL adapter, market ingestion foundation, durable event journal, versioned API models, and first fixture-backed web screen are implemented. The implementation is designed for Linux, Windows, and macOS, with testnet support required before any mainnet trading is enabled.
 
 ## Product direction
 
@@ -22,6 +22,11 @@ This gives us the benefits of web UI development without requiring a hosted back
 - Go foundation, safe testnet defaults, and domain validation are implemented.
 - JSON-RPC connectivity, `book_offers`, and WebSocket book subscriptions are implemented.
 - XRP/token pair discovery and direction deduplication are implemented.
+- A reconnecting market ingestion service now reloads a book snapshot after stream interruption.
+- A reconnecting validated-ledger stream is available for market cursors and future backfill.
+- Normalized market events can be durably journaled and replayed from local JSONL storage.
+- Versioned Go API read models cover quotes, candles, wallets, balances, orders, and transactions.
+- A Vite React/TypeScript workspace provides a responsive read-only testnet market screen with linting and formatting checks.
 - No wallet secrets, signing, or trading code has been enabled yet.
 
 ## Run locally
@@ -40,7 +45,7 @@ On Windows PowerShell, the build command can be:
 go build -o bin/trader.exe ./cmd/trader
 ```
 
-The live XRPL adapter is available to the Go packages but is not yet wired into a user-facing command. The next step is the market ingestion service and first web screen.
+The live XRPL adapter is available to the Go packages but is not yet wired into a user-facing command or local API. The next step is connecting the fixture-backed web screen to a read-only Go application service.
 
 ## Safety principles
 

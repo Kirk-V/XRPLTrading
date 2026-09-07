@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yourname/xrpltrading/internal/config"
+	"github.com/Kirk-V/XRPLTrading/internal/config"
 )
 
 func main() {

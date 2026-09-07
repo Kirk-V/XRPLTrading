@@ -46,8 +46,9 @@ Do not begin with a cloud backend. It would add custody, authentication, uptime,
 - [x] Define initial domain types for `Asset` and `Pair`.
 - [x] Add network configuration with testnet and read-only mode as the safe default.
 - [x] Add a narrow, replaceable read-only XRPL client boundary.
-- [ ] Add frontend workspace, linting, formatting, CI, and cross-platform build checks.
-- [ ] Expand versioned API schemas with `Quote`, `Candle`, `Wallet`, `Balance`, `Order`, and `Transaction`.
+- [x] Add frontend workspace, linting, and formatting.
+- [ ] Add CI and cross-platform build checks.
+- [x] Expand versioned API schemas with `Quote`, `Candle`, `Wallet`, `Balance`, `Order`, and `Transaction`.
 - Decide on encrypted local storage and OS keychain/credential-manager integration.
 - Write threat model and transaction review UX before enabling signing.
 
@@ -58,9 +59,9 @@ Exit condition: the app starts, has no secret material in logs, and can be reset
 - [x] Implement XRPL WebSocket/JSON-RPC adapter behind an interface.
 - [x] Fetch order books through `book_offers`; normalize XRP and issued-currency identities.
 - [x] Implement XRP/token pair discovery and direction deduplication.
-- [ ] Add a market ingestion service that owns subscriptions, reconnects, and backfill.
-- [ ] Add ledger/book-change discovery from a continuous validated-ledger stream.
-- Add a durable event/replay model so reconnects do not silently create chart gaps.
+- [x] Add a market ingestion service that owns subscriptions, reconnects, and snapshot backfill.
+- [x] Add validated-ledger ingestion with reconnect handling.
+- [x] Add a durable event/replay model so reconnects do not silently create chart gaps.
 - Render pair search, market detail, order book, trades/activity, and basic time-series charts.
 
 Exit condition: a testnet user can select an XRP/token pair and see live updates after endpoint interruption and recovery.
@@ -137,10 +138,14 @@ Later, token ↔ token support should only require widening the pair filter and 
 
 ## First implementation tickets
 
-1. Create Go and web workspace plus CI matrix.
-2. Add network config and a read-only XRPL client interface.
-3. Implement asset/pair normalization with table-driven tests.
-4. Implement order-book snapshot plus streaming update reconciliation.
-5. Build the first pair list and market-detail screen.
-6. Add a testnet integration harness and recorded event fixtures.
-7. Decide and document storage/keychain libraries after a small cross-platform spike.
+1. [x] Create Go and web workspace; CI matrix remains pending.
+2. [x] Add network config and a read-only XRPL client interface.
+3. [x] Implement asset/pair normalization with table-driven tests.
+4. [ ] Implement order-book snapshot plus streaming update reconciliation.
+5. [x] Build the first fixture-backed pair list and market-detail screen.
+6. [ ] Add a testnet integration harness and recorded event fixtures.
+7. [ ] Decide and document storage/keychain libraries after a small cross-platform spike.
+
+### Next-session handoff
+
+The repository currently has a fixture-backed read-only web screen, but no local Go HTTP/WebSocket API or application service connecting it to XRPL. The best next slice is to add a small read-only application service that consumes the market ingestors, publishes `api/v1` read models/events, and lets the web screen replace fixtures with live testnet data. Keep order-book reconciliation, ledger gap detection, and durable aggregate storage explicit follow-up work; do not enable wallet secrets or signing.

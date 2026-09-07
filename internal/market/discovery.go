@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/yourname/xrpltrading/internal/domain"
+	"github.com/Kirk-V/XRPLTrading/internal/domain"
 )
 
 // PairDiscovery turns XRPL book-change asset labels into canonical pairs.

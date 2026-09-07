@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Kirk-V/XRPLTrading/internal/config"
+	"github.com/Kirk-V/XRPLTrading/internal/domain"
 	"github.com/gorilla/websocket"
-	"github.com/yourname/xrpltrading/internal/config"
-	"github.com/yourname/xrpltrading/internal/domain"
 )
 
 type APIClient struct {
@@ -79,6 +79,25 @@ func (c *APIClient) SubscribeBook(ctx context.Context, pair domain.Pair) (<-chan
 	}
 	updates := make(chan BookUpdate)
 	go readBookUpdates(ctx, conn, updates)
+	return updates, nil
+}
+
+func (c *APIClient) SubscribeLedger(ctx context.Context) (<-chan LedgerUpdate, error) {
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.config.WebSocket, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dial XRPL websocket: %w", err)
+	}
+	request := map[string]any{
+		"id":      c.ids.Add(1),
+		"command": "subscribe",
+		"streams": []string{"ledger"},
+	}
+	if err := conn.WriteJSON(request); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("subscribe to XRPL ledger: %w", err)
+	}
+	updates := make(chan LedgerUpdate)
+	go readLedgerUpdates(ctx, conn, updates)
 	return updates, nil
 }
 
@@ -172,6 +191,41 @@ func readBookUpdates(ctx context.Context, conn *websocket.Conn, output chan<- Bo
 		}
 		select {
 		case output <- BookUpdate{LedgerIndex: message.LedgerIndex, Offers: message.Offers}:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func readLedgerUpdates(ctx context.Context, conn *websocket.Conn, output chan<- LedgerUpdate) {
+	defer close(output)
+	defer conn.Close()
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+	}()
+	for {
+		var message struct {
+			Type        string `json:"type"`
+			Error       string `json:"error"`
+			LedgerIndex uint32 `json:"ledger_index"`
+			LedgerHash  string `json:"ledger_hash"`
+			LedgerTime  uint32 `json:"ledger_time"`
+			TxnCount    uint32 `json:"txn_count"`
+		}
+		if err := conn.ReadJSON(&message); err != nil {
+			return
+		}
+		if message.Error != "" || message.Type != "ledgerClosed" || message.LedgerIndex == 0 {
+			continue
+		}
+		select {
+		case output <- LedgerUpdate{
+			LedgerIndex: message.LedgerIndex,
+			LedgerHash:  message.LedgerHash,
+			LedgerTime:  message.LedgerTime,
+			TxnCount:    message.TxnCount,
+		}:
 		case <-ctx.Done():
 			return
 		}

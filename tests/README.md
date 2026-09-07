@@ -1,3 +1,9 @@
 # Test fixtures and integration tests
 
-This directory will contain XRPL testnet integration tests, recorded/replayable ledger events, and end-to-end transaction fixtures. Never store real wallet secrets or mainnet credentials here.
+This directory is reserved for XRPL testnet integration tests, recorded/replayable ledger events, and end-to-end transaction fixtures. Unit tests currently live beside their Go packages; the web screen uses clearly labeled fixture data under `web/src/api.ts`.
+
+When adding fixtures:
+
+- Prefer sanitized, deterministic payloads with documented network and ledger ranges.
+- Keep replay data small and useful for reconnect, gap, and normalization tests.
+- Never store real wallet secrets, private keys, mainnet credentials, or unredacted personal data.
