@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -39,20 +40,23 @@ func (c *APIClient) BookOffers(ctx context.Context, pair domain.Pair, limit int)
 	if limit <= 0 || limit > 400 {
 		return nil, errors.New("book limit must be between 1 and 400")
 	}
-	// The book is requested from the perspective of a taker receiving XRP and
-	// paying the issued token. The reverse direction is subscribed separately.
-	params := map[string]any{
-		"taker_gets": currencyObject(pair.Base),
-		"taker_pays": currencyObject(pair.Quote),
-		"limit":      limit,
-	}
-	var result struct {
-		Offers []Offer `json:"offers"`
-	}
-	if err := c.call(ctx, c.config.JSONRPC, "book_offers", params, &result); err != nil {
+	result, err := c.bookAt(ctx, pair.Base, pair.Quote, "validated", limit)
+	if err != nil {
 		return nil, err
 	}
-	return result.Offers, nil
+	offers := make([]Offer, 0, len(result.Offers))
+	for _, raw := range result.Offers {
+		gets, err := amount(raw.Gets, pair.Base)
+		if err != nil {
+			return nil, err
+		}
+		pays, err := amount(raw.Pays, pair.Quote)
+		if err != nil {
+			return nil, err
+		}
+		offers = append(offers, Offer{Owner: raw.Account, Sequence: raw.Sequence, Gets: decimal(gets), Pays: decimal(pays)})
+	}
+	return offers, nil
 }
 
 func (c *APIClient) SubscribeBook(ctx context.Context, pair domain.Pair) (<-chan BookUpdate, error) {
@@ -110,10 +114,9 @@ func currencyObject(asset domain.Asset) map[string]string {
 }
 
 type rpcRequest struct {
-	ID         uint64           `json:"id"`
-	Command    string           `json:"command"`
-	APIVersion int              `json:"api_version"`
-	Params     []map[string]any `json:"params,omitempty"`
+	ID      uint64           `json:"id"`
+	Command string           `json:"method"`
+	Params  []map[string]any `json:"params,omitempty"`
 }
 
 type rpcResponse struct {
@@ -125,10 +128,11 @@ type rpcResponse struct {
 }
 
 func (c *APIClient) call(ctx context.Context, endpoint, command string, params map[string]any, result any) error {
-	req := rpcRequest{ID: c.ids.Add(1), Command: command, APIVersion: 2}
-	if params != nil {
-		req.Params = []map[string]any{params}
+	args := map[string]any{"api_version": 2}
+	for key, value := range params {
+		args[key] = value
 	}
+	req := rpcRequest{ID: c.ids.Add(1), Command: command, Params: []map[string]any{args}}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return err
@@ -147,11 +151,21 @@ func (c *APIClient) call(ctx context.Context, endpoint, command string, params m
 		return fmt.Errorf("XRPL %s returned HTTP %s", command, resp.Status)
 	}
 	var decoded rpcResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&decoded); err != nil {
 		return fmt.Errorf("decode XRPL %s response: %w", command, err)
 	}
 	if decoded.Error != "" {
 		return fmt.Errorf("XRPL %s failed: %s", command, decoded.ErrorMessageOrCode())
+	}
+	if len(decoded.Result) == 0 || string(decoded.Result) == "null" {
+		return fmt.Errorf("XRPL %s returned no result", command)
+	}
+	var status rpcResponse
+	if err := json.Unmarshal(decoded.Result, &status); err != nil {
+		return fmt.Errorf("decode XRPL %s result: %w", command, err)
+	}
+	if status.Error != "" || status.Status == "error" {
+		return fmt.Errorf("XRPL %s failed: %s", command, status.ErrorMessageOrCode())
 	}
 	if result != nil && len(decoded.Result) > 0 {
 		if err := json.Unmarshal(decoded.Result, result); err != nil {
