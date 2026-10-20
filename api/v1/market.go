@@ -33,6 +33,7 @@ type MarketState struct {
 	Markets        []domain.Pair `json:"markets"`
 	AMMDiscovery   AMMDiscovery  `json:"amm_discovery"`
 	AMMCreations   []AMMCreation `json:"amm_creations"`
+	AMMStatuses    []AMMStatus   `json:"amm_statuses"`
 }
 
 // AMMCreation is a creation event, not a current pool balance or execution quote.
@@ -49,4 +50,15 @@ type AMMDiscovery struct {
 	LedgerIndex   uint32    `json:"ledger_index"`
 	LastMessageAt time.Time `json:"last_message_at"`
 	Interrupted   bool      `json:"interrupted"`
+}
+
+// AMMStatus is the current validated pool lookup for a known market.
+// "unknown" means the lookup has not succeeded yet; "none" means XRPL
+// reported no AMM; "inactive" means its reserves are empty or frozen;
+// "active" means a funded, unfrozen pool exists.
+type AMMStatus struct {
+	Pair        domain.Pair `json:"pair"`
+	State       string      `json:"state"`
+	LedgerIndex uint32      `json:"ledger_index,omitempty"`
+	CheckedAt   time.Time   `json:"checked_at,omitempty"`
 }

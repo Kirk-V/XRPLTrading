@@ -24,19 +24,22 @@ type Client interface {
 	BookChanges(context.Context) (xrpl.BookChanges, error)
 	MarketBook(context.Context, domain.Pair) (v1.OrderBook, error)
 	WatchAMMs(context.Context, func(xrpl.AMMStreamUpdate)) error
+	AMMStatus(context.Context, domain.Pair) (v1.AMMStatus, error)
 }
 
 type Service struct {
-	client    Client
-	mu        sync.RWMutex
-	state     v1.MarketState
-	discovery *market.PairDiscovery
+	client      Client
+	mu          sync.RWMutex
+	state       v1.MarketState
+	discovery   *market.PairDiscovery
+	ammChecked  map[domain.Pair]time.Time
+	ammFailures uint64
 }
 
 func New(client Client, cfg config.Config) *Service {
-	return &Service{client: client, discovery: market.NewPairDiscovery(), state: v1.MarketState{
+	return &Service{client: client, discovery: market.NewPairDiscovery(), ammChecked: make(map[domain.Pair]time.Time), state: v1.MarketState{
 		Network: string(cfg.Network), ReadOnly: true, Endpoint: cfg.JSONRPC, Connection: "connecting", Markets: []domain.Pair{},
-		AMMDiscovery: v1.AMMDiscovery{Connection: "connecting"}, AMMCreations: []v1.AMMCreation{},
+		AMMDiscovery: v1.AMMDiscovery{Connection: "connecting"}, AMMCreations: []v1.AMMCreation{}, AMMStatuses: []v1.AMMStatus{},
 	}}
 }
 
@@ -45,7 +48,9 @@ func New(client Client, cfg config.Config) *Service {
 func (s *Service) Run(ctx context.Context) {
 	ammDone := make(chan struct{})
 	go func() { defer close(ammDone); s.runAMMs(ctx) }()
-	defer func() { <-ammDone }()
+	statusDone := make(chan struct{})
+	go func() { defer close(statusDone); s.runAMMStatusChecks(ctx) }()
+	defer func() { <-ammDone; <-statusDone }()
 	for {
 		s.refresh(ctx)
 		select {
@@ -77,9 +82,11 @@ func (s *Service) refresh(ctx context.Context) {
 			break
 		}
 		pair, fresh, err := s.discovery.Observe(change.CurrencyA, change.CurrencyB)
-		if err == nil && fresh {
-			s.state.Markets = append(s.state.Markets, pair)
+		if err != nil || !fresh {
+			continue
 		}
+		s.state.Markets = append(s.state.Markets, pair)
+		s.ensureAMMStatusLocked(pair)
 	}
 }
 
@@ -89,6 +96,7 @@ func (s *Service) snapshot() v1.MarketState {
 	result := s.state
 	result.Markets = append([]domain.Pair{}, s.state.Markets...)
 	result.AMMCreations = append([]v1.AMMCreation{}, s.state.AMMCreations...)
+	result.AMMStatuses = append([]v1.AMMStatus{}, s.state.AMMStatuses...)
 	if result.AMMDiscovery.Connection == "connected" && time.Since(result.AMMDiscovery.LastMessageAt) > 30*time.Second {
 		result.AMMDiscovery.Connection = "stale"
 		result.AMMDiscovery.Error = "Waiting for AMM stream ledger heartbeat."
@@ -126,6 +134,21 @@ func (s *Service) Handler(webDir string) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, book)
+	})
+	mux.HandleFunc("GET /api/v1/amm", func(w http.ResponseWriter, r *http.Request) {
+		pair, err := xrpl.ValidateMarketInput(r.URL.Query().Get("currency"), r.URL.Query().Get("issuer"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		result, err := s.client.AMMStatus(ctx, pair)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
 	})
 	mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Errorf("unknown API route"))

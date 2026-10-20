@@ -176,6 +176,9 @@ func (c *APIClient) call(ctx context.Context, endpoint, command string, params m
 }
 
 func (r rpcResponse) ErrorMessageOrCode() string {
+	if r.Error != "" && r.ErrorMessage != "" {
+		return r.Error + ": " + r.ErrorMessage
+	}
 	if r.ErrorMessage != "" {
 		return r.ErrorMessage
 	}

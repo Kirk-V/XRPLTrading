@@ -29,12 +29,19 @@ export type MarketState = {
     interrupted: boolean
   }
   amm_creations: AMMCreation[]
+  amm_statuses: AMMStatus[]
 }
 export type AMMCreation = {
   pair: Pair
   ledger_index: number
   transaction_hash: string
   observed_at: string
+}
+export type AMMStatus = {
+  pair: Pair
+  state: 'active' | 'inactive' | 'none' | 'unknown'
+  ledger_index?: number
+  checked_at?: string
 }
 export type BookLevel = {
   price: string

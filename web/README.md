@@ -19,6 +19,7 @@ Open http://localhost:8080. For hot reload, keep Go running on port 8080 and run
 ```bash
 npm --prefix web run build
 npm --prefix web run lint
+npm --prefix web run test
 npm --prefix web run format
 ```
 
@@ -35,3 +36,5 @@ The sidebar also shows a separate AMM listener status and the newest 10 validate
 For mainnet, run the Go service with `go run ./cmd/trader -network mainnet`. The frontend takes its network label from the API and clears manual watches, selection, and chart state when it detects a network change. Mainnet remains read-only; the default without a flag remains testnet.
 
 See [How market discovery works](../README.md#how-market-discovery-works) for discovery sources, retention limits, missed-event behavior, and manual-watch semantics.
+
+The market list offers All, New AMMs, and Active AMMs filters, with search for readable labels, full currency codes, issuers, or `XRP/TOKEN` pairs. Active AMMs come from validated `amm_info` checks of known pairs, paced by Go and refreshed about every five minutes; check progress is visible. Manually added pairs get an immediate AMM check. Currency hex and issuer addresses are shortened only for display; the full identifiers remain available in the market detail and search.

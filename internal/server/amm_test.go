@@ -81,3 +81,40 @@ func TestAMMReconnectAndCancellation(t *testing.T) {
 		t.Fatalf("bad recovery: calls=%d state=%+v", client.calls, state)
 	}
 }
+
+func TestAMMStatusChecksKnownMarketWithoutConfusingLookupFailuresWithAbsence(t *testing.T) {
+	client := &fakeClient{}
+	service := New(client, config.Default())
+	service.refresh(context.Background())
+	pair, found := service.nextAMMStatusPair()
+	if !found || pair != service.snapshot().Markets[0] {
+		t.Fatal("discovered pair not scheduled for lookup")
+	}
+	if _, found := service.nextAMMStatusPair(); found {
+		t.Fatal("lookup immediately repeated")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	// Make it due again and run the real status-check loop against the fake client.
+	service.ammChecked[pair] = time.Time{}
+	done := make(chan struct{})
+	go func() { service.runAMMStatusChecks(ctx); close(done) }()
+	deadline := time.After(time.Second)
+	for {
+		status := service.snapshot().AMMStatuses
+		if len(status) == 1 && status[0].State == "active" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("pool lookup did not update status")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("status loop did not stop")
+	}
+}

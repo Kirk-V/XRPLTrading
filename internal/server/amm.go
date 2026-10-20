@@ -72,7 +72,15 @@ func (s *Service) onAMMUpdate(update xrpl.AMMStreamUpdate) {
 		}
 	}
 	if len(s.state.Markets) >= 200 {
+		evicted := s.state.Markets[0]
 		s.state.Markets = s.state.Markets[1:]
+		delete(s.ammChecked, evicted)
+		for i, item := range s.state.AMMStatuses {
+			if item.Pair == evicted {
+				s.state.AMMStatuses = append(s.state.AMMStatuses[:i], s.state.AMMStatuses[i+1:]...)
+				break
+			}
+		}
 		// Rebuild the bounded deduplication set after evicting an old market, so
 		// polling can discover it again later and fresh AMMs are never hidden by a cap.
 		s.discovery = market.NewPairDiscovery()
@@ -82,4 +90,5 @@ func (s *Service) onAMMUpdate(update xrpl.AMMStreamUpdate) {
 	}
 	_, _, _ = s.discovery.Observe("XRP_drops", creation.Pair.Quote.Issuer+"/"+creation.Pair.Quote.Currency)
 	s.state.Markets = append(s.state.Markets, creation.Pair)
+	s.ensureAMMStatusLocked(creation.Pair)
 }

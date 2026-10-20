@@ -727,3 +727,86 @@ input:focus-visible {
   border-radius: 6px;
   padding: 6px 9px;
 }
+
+.market-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.market-filters button {
+  border: 1px solid #2a3948;
+  border-radius: 7px;
+  background: #111b25;
+  color: #a9bac9;
+  font-size: 11px;
+  padding: 7px 9px;
+}
+.market-filters button[aria-pressed='true'] {
+  background: #173334;
+  color: #e8f7f0;
+  border-color: #4be0b0;
+}
+.market-filters button span {
+  opacity: 0.7;
+}
+.filter-note {
+  color: #a9bac9;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.market-row {
+  align-items: center;
+  gap: 6px;
+}
+.market-row > span:first-child {
+  overflow: hidden;
+}
+.market-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.market-badge {
+  flex: 0 0 auto;
+  border: 1px solid #2a6661;
+  border-radius: 5px;
+  padding: 3px 5px;
+  color: #86e2c0;
+  font-size: 10px;
+}
+.market-badge.new {
+  border-color: #7b6241;
+  color: #ffd290;
+}
+.token-details {
+  margin-top: 12px;
+  color: #a9bac9;
+  font-size: 12px;
+}
+.token-details summary {
+  cursor: pointer;
+}
+.token-details dl {
+  display: grid;
+  grid-template-columns: 75px minmax(0, 1fr);
+  gap: 8px;
+  margin: 12px 0 0;
+}
+.token-details dt {
+  color: #a9bac9;
+}
+.token-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.market-header h2 {
+  max-width: 530px;
+}
+@media (max-width: 560px) {
+  .market-filters button {
+    flex: 1 1 auto;
+  }
+}

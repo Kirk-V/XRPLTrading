@@ -109,3 +109,7 @@ func (f *fakeClient) WatchAMMs(ctx context.Context, emit func(xrpl.AMMStreamUpda
 	<-ctx.Done()
 	return ctx.Err()
 }
+
+func (f *fakeClient) AMMStatus(_ context.Context, pair domain.Pair) (v1.AMMStatus, error) {
+	return v1.AMMStatus{Pair: pair, State: "active", LedgerIndex: 42, CheckedAt: time.Now()}, nil
+}

@@ -65,6 +65,7 @@ Validation and a standalone Go build:
 go test -race ./api/... ./internal/... ./cmd/...
 npm --prefix web run build
 npm --prefix web run lint
+npm --prefix web run test
 npm --prefix web run format
 go build -o bin/trader ./cmd/trader
 ```
@@ -92,13 +93,23 @@ The server retains up to **200 discovered pairs** in memory. Trading-activity di
 - A new pool may have no limit offers. The current book view does not display AMM reserves or swap quotes.
 - Discovery does not assess a token's quality or liquidity and never places trades.
 
+### Finding and filtering markets
+
+The sidebar has **All**, **New AMMs**, and **Active AMMs** filters. Search works within the chosen filter. You can search a pair such as `XRP/RLUSD`, a readable token label, its exact 40-character currency code, or the full issuer address.
+
+- **New AMMs** shows XRP/token pools created while this service was running. It uses successful, validated `AMMCreate` events and does not enumerate older pools.
+- **Active AMMs** checks the currently known pairs with XRPL's validated `amm_info` method. It includes pools with positive reserves and no frozen asset flags. The service checks known pairs at a paced rate and refreshes results about every five minutes. The filter shows check progress; an unverified lookup is never treated as proof that no pool exists.
+- **All** shows the bounded discovered pair list and any markets you manually watch. Discovery and the active filter can only cover pairs already known to the service or entered manually; they do not scan every possible token.
+
+Market rows show readable text from zero-padded hex currency codes when possible, or a short hex code if it cannot be decoded safely. Issuer addresses are shortened. **Full token identifiers** in the market detail reveals the exact currency code and issuer, and the copy button copies the full issuer. Display labels never replace currency-plus-issuer identity.
+
 ### Tracking a specific market
 
 Select a discovered pair, search by currency/issuer, or enter the exact currency code and full issuer address under **Watch a market**. Manual selection works even when discovery has not observed the pair. No wallet is required.
 
 Only the selected market refreshes, about every five seconds after each completed request. Both sides of its order book use the same validated ledger; prices are token units per XRP, and sizes use funded XRP quantities. Empty books are shown explicitly. Failed refreshes retain the last snapshot with a stale warning and retry automatically.
 
-Manual watch entries are stored only in the browser session and disappear on page reload. Unselected markets are not monitored in the background. The chart holds up to 120 midpoint observations for the current selection, requires both bids and asks, and resets when switching markets, reloading, or changing networks. It is not historical candles or a trade feed.
+Manual watch entries are stored only in the browser session and disappear on page reload. A newly entered market also gets a direct AMM status check for the Active AMMs filter. Unselected markets are not monitored in the background. The chart holds up to 120 midpoint observations for the current selection, requires both bids and asks, and resets when switching markets, reloading, or changing networks. It is not historical candles or a trade feed.
 
 A saved watchlist, background market collection, historical backfill, journal-backed charts, AMM pricing, and trading remain follow-up work. The current dashboard does not use the existing book ingestor or durable event journal. See [ARCHITECTURE.md](ARCHITECTURE.md#connected-read-only-dashboard) for implementation details and [PLAN.md](PLAN.md#next-session-handoff) for the development handoff.
 

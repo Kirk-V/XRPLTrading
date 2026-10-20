@@ -166,3 +166,11 @@ Reference: [AMMCreate](https://xrpl.org/docs/references/protocol/transactions/ty
 ## Read-only network selection
 
 `config.ForNetwork` selects a matching JSON-RPC/WebSocket endpoint pair. The CLI supports `-network testnet` (default) and `-network mainnet`; mainnet uses `https://s1.ripple.com:51234/` and `wss://s1.ripple.com/`, listed in the [XRPL public server reference](https://xrpl.org/docs/tutorials/public-servers). Both modes are read-only. Network changes require restarting the service, which resets discovery state. The UI derives all network labels from the API and clears manual selections and session charts when the reported network changes.
+
+## Active AMM filter and compact identities
+
+`internal/server.runAMMStatusChecks` checks discovered XRP/token pairs against the selected network's validated `amm_info` response, pacing requests to at most one new lookup every 500 ms, with a five-minute result interval and shorter retry after errors. Its read model distinguishes `active`, `inactive`, `none`, and `unknown`; a missing pool (`actNotFound`) is not conflated with a transient request failure. Positive reserves and unfrozen assets define an active pool for this filter. The list is limited to known markets, up to 200; it does not enumerate all mainnet AMMs. Manual market entry uses the same lookup through `GET /api/v1/amm?currency=...&issuer=...`.
+
+The frontend decodes only printable, zero-padded ASCII hex currency labels. Other 40-character codes are shortened without inferring a name. Issuers are shortened in rows and search includes the full identifiers. The market detail keeps the full currency and issuer under an expandable disclosure so the true asset identity remains inspectable.
+
+Protocol references: [amm_info](https://xrpl.org/docs/references/http-websocket-apis/public-api-methods/path-and-order-book-methods/amm_info) and [currency formats](https://xrpl.org/docs/references/protocol/data-types/currency-formats).
