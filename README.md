@@ -2,7 +2,7 @@
 
 A local-first trading application for the XRP Ledger (XRPL). The initial scope is finding and monitoring XRP-to-issued-token markets, viewing live market data and charts, managing wallets and funds, executing trades, and creating/canceling limit offers.
 
-The read-only XRPL adapter, market ingestion foundation, durable event journal, versioned API models, and first fixture-backed web screen are implemented. The implementation is designed for Linux, Windows, and macOS, with testnet support required before any mainnet trading is enabled.
+The read-only XRPL adapter, market ingestion foundation, durable event journal, versioned API models, and a connected read-only web dashboard are implemented. The implementation is designed for Linux, Windows, and macOS, with testnet support required before any mainnet trading is enabled.
 
 ## Product direction
 
@@ -26,26 +26,97 @@ This gives us the benefits of web UI development without requiring a hosted back
 - A reconnecting validated-ledger stream is available for market cursors and future backfill.
 - Normalized market events can be durably journaled and replayed from local JSONL storage.
 - Versioned Go API read models cover quotes, candles, wallets, balances, orders, and transactions.
-- A Vite React/TypeScript workspace provides a responsive read-only testnet market screen with linting and formatting checks.
+- A Vite React/TypeScript dashboard connects to a local Go HTTP API for testnet or read-only mainnet market discovery, validated order-book snapshots, and a session mid-price chart.
 - No wallet secrets, signing, or trading code has been enabled yet.
 
 ## Run locally
 
-Requirements: Go 1.24 or newer. The current executable is a read-only foundation smoke test.
+Requirements: Go 1.24 or newer and Node.js 22.13 or newer (Node 24 LTS also works).
+
+From the repository root, build the UI once and start the app:
 
 ```bash
-go test ./...
+npm --prefix web ci
+npm --prefix web run build
 go run ./cmd/trader
+```
+
+To view the real network, start the service with:
+
+```bash
+go run ./cmd/trader -network mainnet
+```
+
+Mainnet uses Ripple's public `s1.ripple.com` HTTP/WebSocket endpoints and remains read-only. Market discovery, AMM detection, and order-book queries use the selected network. The UI displays a prominent **MAINNET** label. Omitting `-network` still defaults to testnet; use `-network testnet` to select it explicitly. Stop the existing service before switching. Reloading clears manual watches; an open tab also clears its selected market and chart when it detects a network change.
+
+Open **http://localhost:8080**. The Go process serves both the built UI and its read-only API. Stop it with Ctrl+C. Use `-port 8081` if port 8080 is occupied; `-web /path/to/web/dist` selects a different built UI directory.
+
+For UI development, keep the Go service running on port 8080, then in another terminal:
+
+```bash
+npm --prefix web run dev
+```
+
+Open the Vite URL printed in that terminal. Vite proxies `/api` to the local Go service. Frontend changes hot-reload; production UI changes require another `npm --prefix web run build`.
+
+Validation and a standalone Go build:
+
+```bash
+go test -race ./api/... ./internal/... ./cmd/...
+npm --prefix web run build
+npm --prefix web run lint
+npm --prefix web run test
+npm --prefix web run format
 go build -o bin/trader ./cmd/trader
 ```
 
-On Windows PowerShell, the build command can be:
+GitHub Actions runs the Go tests and build on Linux, Windows, and macOS, with
+the race detector on Linux. It also builds, lints, tests, and checks formatting
+for the web UI. The Go commands target project packages explicitly so installed
+frontend dependencies are not mistaken for part of this module.
 
-```powershell
-go build -o bin/trader.exe ./cmd/trader
-```
+On Windows, use `go build -o bin/trader.exe ./cmd/trader`. Run from the repository root or pass `-web` so the binary can find the built UI.
 
-The live XRPL adapter is available to the Go packages but is not yet wired into a user-facing command or local API. The next step is connecting the fixture-backed web screen to a read-only Go application service.
+## How market discovery works
+
+Discovery runs on the network selected at startup: testnet by default, or mainnet with `-network mainnet`. Both modes are read-only and support XRP/issued-token pairs; token/token markets are not included.
+
+| Source | How it works | What it finds |
+| --- | --- | --- |
+| Trading activity | The Go service calls `book_changes` for the latest validated ledger, waiting five seconds after each request before polling again. | XRP/token pairs with activity in the sampled ledgers. |
+| New AMMs | A continuous WebSocket subscription listens to transactions and ledger heartbeats. Only validated `AMMCreate` transactions whose metadata reports `tesSUCCESS` are accepted. | Newly created XRP/token pools, without waiting for later trading activity. |
+
+Tokens are identified by their **currency code and full issuer address**, not their ticker alone. Pairs are normalized with XRP as the base asset, so observations in opposite directions do not create duplicates. An AMM creation is still reported when its pair was already discovered through trading activity.
+
+The server retains up to **200 discovered pairs** in memory. Trading-activity discovery stops adding pairs when this limit is reached; a new AMM can still add its pair by evicting the oldest retained pair. The server also keeps the latest **100 AMM creation events**, deduplicated by transaction hash within that retained history; the **New AMMs** panel shows the latest **10**. Discovered pairs and creation history reset when the Go service restarts. The browser sees updates through its five-second API polling cycle.
+
+### Discovery limits and connection status
+
+- This is not a complete catalog of existing markets or pools. Quiet markets may not appear through activity discovery, and pools created before the listener starts are not enumerated.
+- Activity polling can skip intermediate ledgers. The AMM listener reconnects automatically, but events missed during disconnects are not backfilled.
+- The AMM listener has a separate status from market polling. It uses ledger heartbeats to detect a silent connection and flags interruptions or ledger gaps; that warning remains for the server session after reconnection.
+- A new pool may have no limit offers. The current book view does not display AMM reserves or swap quotes.
+- Discovery does not assess a token's quality or liquidity and never places trades.
+
+### Finding and filtering markets
+
+The sidebar has **All**, **New AMMs**, and **Active AMMs** filters. Search works within the chosen filter. You can search a pair such as `XRP/RLUSD`, a readable token label, its exact 40-character currency code, or the full issuer address.
+
+- **New AMMs** shows XRP/token pools created while this service was running. It uses successful, validated `AMMCreate` events and does not enumerate older pools.
+- **Active AMMs** checks the currently known pairs with XRPL's validated `amm_info` method. It includes pools with positive reserves and no frozen asset flags. The service checks known pairs at a paced rate and refreshes results about every five minutes. The filter shows check progress; an unverified lookup is never treated as proof that no pool exists.
+- **All** shows the bounded discovered pair list and any markets you manually watch. Discovery and the active filter can only cover pairs already known to the service or entered manually; they do not scan every possible token.
+
+Market rows show readable text from zero-padded hex currency codes when possible, or a short hex code if it cannot be decoded safely. Issuer addresses are shortened. **Full token identifiers** in the market detail reveals the exact currency code and issuer, and the copy button copies the full issuer. Display labels never replace currency-plus-issuer identity.
+
+### Tracking a specific market
+
+Select a discovered pair, search by currency/issuer, or enter the exact currency code and full issuer address under **Watch a market**. Manual selection works even when discovery has not observed the pair. No wallet is required.
+
+Only the selected market refreshes, about every five seconds after each completed request. Both sides of its order book use the same validated ledger; prices are token units per XRP, and sizes use funded XRP quantities. Empty books are shown explicitly. Failed refreshes retain the last snapshot with a stale warning and retry automatically.
+
+Manual watch entries are stored only in the browser session and disappear on page reload. A newly entered market also gets a direct AMM status check for the Active AMMs filter. Unselected markets are not monitored in the background. The chart holds up to 120 midpoint observations for the current selection, requires both bids and asks, and resets when switching markets, reloading, or changing networks. It is not historical candles or a trade feed.
+
+A saved watchlist, background market collection, historical backfill, journal-backed charts, AMM pricing, and trading remain follow-up work. The current dashboard does not use the existing book ingestor or durable event journal. See [ARCHITECTURE.md](ARCHITECTURE.md#connected-read-only-dashboard) for implementation details and [PLAN.md](PLAN.md#next-session-handoff) for the development handoff.
 
 ## Safety principles
 

@@ -1,6 +1,6 @@
 # Test fixtures and integration tests
 
-This directory is reserved for XRPL testnet integration tests, recorded/replayable ledger events, and end-to-end transaction fixtures. Unit tests currently live beside their Go packages; the web screen uses clearly labeled fixture data under `web/src/api.ts`.
+This directory is reserved for XRPL testnet integration tests, recorded/replayable ledger events, and end-to-end transaction fixtures. Unit tests currently live beside their Go packages; the XRPL adapter tests use local mock HTTP servers with realistic wire payloads. The web screen now consumes the local Go service rather than fixture data.
 
 When adding fixtures:
 

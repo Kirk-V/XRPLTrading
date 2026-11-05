@@ -1,9 +1,180 @@
-import { useState } from 'react'
-import { testnetMarkets, type ConnectionState, type MarketSummary } from './api'
+import { useEffect, useState, type FormEvent } from 'react'
+import { currencyLabel, shortIssuer, matchesPair } from './identifiers'
+import {
+  getJSON,
+  pairKey,
+  type BookLevel,
+  type AMMCreation,
+  type AMMStatus,
+  type MarketState,
+  type OrderBook,
+  type Pair,
+} from './api'
+
+const time = (value: string) => new Date(value).toLocaleTimeString()
 
 function App() {
-  const [selected, setSelected] = useState(testnetMarkets[0])
-  const [connection, setConnection] = useState<ConnectionState>('connected')
+  const [state, setState] = useState<MarketState>()
+  const [error, setError] = useState('')
+  const [selected, setSelected] = useState<Pair>()
+  const [manual, setManual] = useState<Pair[]>([])
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<'all' | 'new' | 'active'>('all')
+  const [manualStatuses, setManualStatuses] = useState<
+    Record<string, AMMStatus>
+  >({})
+  const [currency, setCurrency] = useState('')
+  const [issuer, setIssuer] = useState('')
+  const [formError, setFormError] = useState('')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout>
+    let previousNetwork: string | undefined
+    async function refresh() {
+      try {
+        const next = await getJSON<MarketState>(
+          '/api/v1/state',
+          AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
+        )
+        if (controller.signal.aborted) return
+        setState(next)
+        setError('')
+        if (previousNetwork && previousNetwork !== next.network) {
+          setManual([])
+          setManualStatuses({})
+          setFilter('all')
+          setSelected(next.markets[0])
+          setCurrency('')
+          setIssuer('')
+          setFormError('')
+          setSearch('')
+        } else {
+          setSelected((current) => current ?? next.markets[0])
+        }
+        previousNetwork = next.network
+      } catch (cause) {
+        if (!controller.signal.aborted)
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : 'Unable to reach the local service.',
+          )
+      } finally {
+        if (!controller.signal.aborted) timer = setTimeout(refresh, 5000)
+      }
+    }
+    void refresh()
+    return () => {
+      controller.abort()
+      clearTimeout(timer)
+    }
+  }, [])
+
+  const markets = [
+    ...new Map(
+      [...(state?.markets ?? []), ...manual].map((pair) => [
+        pairKey(pair),
+        pair,
+      ]),
+    ).values(),
+  ]
+  const newKeys = new Set(
+    (state?.amm_creations ?? []).map((creation) => pairKey(creation.pair)),
+  )
+  const statuses = new Map(
+    (state?.amm_statuses ?? []).map((status) => [pairKey(status.pair), status]),
+  )
+  for (const [key, status] of Object.entries(manualStatuses)) {
+    if (!statuses.has(key)) statuses.set(key, status)
+  }
+  const checkedCount = markets.filter(
+    (pair) =>
+      statuses.get(pairKey(pair))?.state !== undefined &&
+      statuses.get(pairKey(pair))?.state !== 'unknown',
+  ).length
+  const activeCount = markets.filter(
+    (pair) => statuses.get(pairKey(pair))?.state === 'active',
+  ).length
+  const filtered = markets
+    .filter((pair) => {
+      const key = pairKey(pair)
+      return (
+        matchesPair(pair, search) &&
+        (filter === 'all' ||
+          (filter === 'new' && newKeys.has(key)) ||
+          (filter === 'active' && statuses.get(key)?.state === 'active'))
+      )
+    })
+    .sort((a, b) => {
+      if (filter === 'new') {
+        const aIndex =
+          state?.amm_creations.findIndex(
+            (item) => pairKey(item.pair) === pairKey(a),
+          ) ?? 0
+        const bIndex =
+          state?.amm_creations.findIndex(
+            (item) => pairKey(item.pair) === pairKey(b),
+          ) ?? 0
+        return aIndex - bIndex
+      }
+      return (
+        currencyLabel(a.quote.currency).localeCompare(
+          currencyLabel(b.quote.currency),
+        ) || (a.quote.issuer ?? '').localeCompare(b.quote.issuer ?? '')
+      )
+    })
+  const ammStatus = error
+    ? 'offline'
+    : (state?.amm_discovery?.connection ?? 'connecting')
+  const connection = error ? 'offline' : (state?.connection ?? 'connecting')
+  function watch(event: FormEvent) {
+    event.preventDefault()
+    const code = currency.trim()
+    const address = issuer.trim()
+    if (
+      !/^(?:[A-Za-z0-9?!@#$%^&*<>(){}[\]|]{3}|[A-Fa-f0-9]{40})$/.test(code) ||
+      code.toUpperCase() === 'XRP' ||
+      !/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(address)
+    ) {
+      setFormError(
+        'Enter a token currency code and its full classic issuer address.',
+      )
+      return
+    }
+    const pair: Pair = {
+      base: { currency: 'XRP' },
+      quote: {
+        currency: code.length === 40 ? code.toUpperCase() : code,
+        issuer: address,
+      },
+    }
+    setManual((current) =>
+      [
+        ...current.filter((item) => pairKey(item) !== pairKey(pair)),
+        pair,
+      ].slice(-200),
+    )
+    setSelected(pair)
+    setFormError('')
+    const params = new URLSearchParams({
+      currency: pair.quote.currency,
+      issuer: pair.quote.issuer!,
+    })
+    void getJSON<AMMStatus>(`/api/v1/amm?${params}`, AbortSignal.timeout(18000))
+      .then((status) =>
+        setManualStatuses((current) => ({
+          ...current,
+          [pairKey(pair)]: status,
+        })),
+      )
+      .catch(() =>
+        setManualStatuses((current) => ({
+          ...current,
+          [pairKey(pair)]: { pair, state: 'unknown' },
+        })),
+      )
+  }
 
   return (
     <div className="app-shell">
@@ -15,26 +186,29 @@ function App() {
           <span>XRPL Trading</span>
         </a>
         <div className="topbar-actions">
-          <span className="network-pill">
-            <span className="status-dot" /> TESTNET
+          <span
+            className={`network-pill ${state?.network === 'mainnet' ? 'mainnet' : ''}`}
+          >
+            {state?.network.toUpperCase() ?? 'CONNECTING'}
           </span>
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => setConnection('reconnecting')}
-          >
-            {connection === 'connected' ? 'Read-only mode' : 'Reconnecting…'}
-          </button>
-          <button
-            className="avatar"
-            type="button"
-            aria-label="Open wallet menu"
-          >
-            W
-          </button>
+          <span className="mode-label">Read-only</span>
         </div>
       </header>
-
+      <div className={`connection-banner ${connection}`} role="status">
+        <span className={`status-dot ${connection}`} />
+        <strong>{connection}</strong>
+        <span>
+          {error ||
+            state?.error ||
+            'Validated snapshots · refreshes every 5 seconds'}
+        </span>
+        {state?.ledger_index ? (
+          <span>
+            Ledger #{state.ledger_index.toLocaleString()} · closed{' '}
+            {time(state.ledger_closed_at)}
+          </span>
+        ) : null}
+      </div>
       <main className="workspace">
         <aside className="market-sidebar" aria-label="Markets">
           <div className="sidebar-heading">
@@ -42,197 +216,437 @@ function App() {
               <p className="eyebrow">MARKETS</p>
               <h1>XRP pairs</h1>
             </div>
-            <button
-              className="icon-button"
-              type="button"
-              aria-label="Add market"
-            >
-              +
-            </button>
+            <span>{markets.length}</span>
           </div>
           <label className="search-field">
-            <span aria-hidden="true">⌕</span>
             <input
               type="search"
-              placeholder="Search markets"
+              placeholder="Search currency or issuer"
               aria-label="Search markets"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
             />
           </label>
-          <div className="market-list">
-            {testnetMarkets.map((market) => (
-              <MarketRow
-                key={market.id}
-                market={market}
-                selected={selected.id === market.id}
-                onSelect={setSelected}
-              />
-            ))}
-          </div>
-          <div className="discovery-note">
-            <span className="sparkle" aria-hidden="true">
-              ✦
-            </span>
-            <div>
-              <strong>Pair discovery is on</strong>
-              <span>New XRP/token markets will appear here.</span>
-            </div>
-          </div>
-        </aside>
-
-        <section
-          className="market-main"
-          aria-label={`${selected.symbol} market`}
-        >
-          <div className="market-header">
-            <div>
-              <div className="breadcrumb">
-                Markets <span>/</span> XRP / {selected.symbol}
-              </div>
-              <h2>
-                XRP <span className="muted-slash">/</span> {selected.symbol}
-              </h2>
-              <p className="issuer">
-                Issuer <code>{selected.issuer}</code>{' '}
-                <button
-                  type="button"
-                  className="copy-button"
-                  aria-label="Copy issuer"
-                >
-                  □
-                </button>
-              </p>
-            </div>
-            <div className="price-summary">
-              <strong>{selected.quote.mid}</strong>
-              <span className="positive">{selected.change24h}</span>
-              <small>USD per XRP</small>
-            </div>
-          </div>
-
-          <div className="stat-row">
-            <Stat label="24h activity" value={selected.activity} />
-            <Stat label="Spread" value={selected.quote.spread ?? '—'} />
-            <Stat
-              label="Ledger"
-              value={`#${selected.quote.ledger_index.toLocaleString()}`}
-            />
-            <div className="live-state">
-              <span className={`status-dot ${connection}`} />
-              {connection === 'connected' ? 'Live' : 'Reconnecting'}
-            </div>
-          </div>
-
-          <div className="chart-card">
-            <div
-              className="card-tabs"
-              role="tablist"
-              aria-label="Chart interval"
+          <div
+            className="market-filters"
+            role="group"
+            aria-label="Market filter"
+          >
+            <button
+              type="button"
+              aria-pressed={filter === 'all'}
+              onClick={() => setFilter('all')}
             >
-              <button className="active" type="button" role="tab">
-                Price
+              All <span>{markets.length}</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={filter === 'new'}
+              onClick={() => setFilter('new')}
+            >
+              New AMMs{' '}
+              <span>
+                {markets.filter((pair) => newKeys.has(pairKey(pair))).length}
+              </span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={filter === 'active'}
+              onClick={() => setFilter('active')}
+            >
+              Active AMMs <span>{activeCount}</span>
+            </button>
+          </div>
+          {filter === 'active' && (
+            <p className="filter-note" role="status">
+              Checking known pairs for funded pools: {checkedCount} /{' '}
+              {markets.length}. Results are refreshed about every 5 minutes.
+            </p>
+          )}
+          {filter === 'new' && (
+            <p className="filter-note">
+              Pools created since this service started. Past pools are not
+              backfilled.
+            </p>
+          )}
+          <div className="market-list">
+            {filtered.map((pair) => (
+              <button
+                className={`market-row ${selected && pairKey(selected) === pairKey(pair) ? 'selected' : ''}`}
+                type="button"
+                key={pairKey(pair)}
+                onClick={() => setSelected(pair)}
+                aria-pressed={!!selected && pairKey(selected) === pairKey(pair)}
+              >
+                <span>
+                  <strong>XRP / {currencyLabel(pair.quote.currency)}</strong>
+                  <small title={pair.quote.issuer}>
+                    {shortIssuer(pair.quote.issuer ?? '')}
+                  </small>
+                </span>
+                {statuses.get(pairKey(pair))?.state === 'active' && (
+                  <span className="market-badge">AMM</span>
+                )}
+                {filter === 'all' && newKeys.has(pairKey(pair)) && (
+                  <span className="market-badge new">New</span>
+                )}
               </button>
-              <button type="button" role="tab">
-                Depth
-              </button>
-              <button type="button" role="tab">
-                Activity
-              </button>
-              <span className="intervals">
-                <button type="button">1H</button>
-                <button className="active" type="button">
-                  1D
-                </button>
-                <button type="button">1W</button>
+            ))}
+            {!filtered.length && (
+              <p className="empty-state">
+                {filter === 'new'
+                  ? 'No new AMMs match this search.'
+                  : filter === 'active'
+                    ? checkedCount < markets.length
+                      ? 'Checking pools; no matching active AMMs yet.'
+                      : 'No active AMMs match this search.'
+                    : markets.length
+                      ? 'No matching markets.'
+                      : 'Waiting for XRP/token activity. You can also watch a market below.'}
+              </p>
+            )}
+          </div>
+          <form className="watch-form" onSubmit={watch}>
+            <h3>Watch a market</h3>
+            <p className="empty-state">
+              Updates while selected. This list is not saved after a page
+              reload.
+            </p>
+            <label>
+              Currency
+              <input
+                value={currency}
+                onChange={(event) => setCurrency(event.target.value)}
+                placeholder="USD or 40-character hex"
+                maxLength={40}
+                required
+              />
+            </label>
+            <label>
+              Issuer
+              <input
+                value={issuer}
+                onChange={(event) => setIssuer(event.target.value)}
+                placeholder="Full r… address"
+                maxLength={35}
+                required
+              />
+            </label>
+            <button className="secondary-button" type="submit">
+              Watch market
+            </button>
+            {formError && (
+              <p role="alert" className="error-text">
+                {formError}
+              </p>
+            )}
+          </form>
+          <section className="amm-discovery" aria-label="AMM discovery">
+            <h3>New AMMs</h3>
+            <p className="amm-status" role="status">
+              <span className={`status-dot ${ammStatus}`} /> Listener:{' '}
+              {ammStatus}
+            </p>
+            {state?.amm_discovery?.error && (
+              <p className="error-text">{state.amm_discovery.error}</p>
+            )}
+            {state?.amm_discovery?.interrupted && (
+              <p className="error-text">
+                Discovery was interrupted. Pools created during gaps may be
+                missing.
+              </p>
+            )}
+            <p className="empty-state">
+              {(state?.amm_creations ?? []).length} creations seen this session.
+              Use the New AMMs filter to browse them.
+            </p>
+          </section>
+          <div className="discovery-note">
+            <div>
+              <strong>Discovering active markets</strong>
+              <span>
+                Up to 200 pairs from sampled trading activity and new AMMs this
+                session. New pools appear even before trading activity.
               </span>
             </div>
-            <div
-              className="chart"
-              aria-label="Illustrative XRP USD price chart"
-              role="img"
-            >
-              <div className="chart-grid" />
-              <svg
-                viewBox="0 0 900 280"
-                preserveAspectRatio="none"
-                aria-hidden="true"
-              >
-                <defs>
-                  <linearGradient id="fill" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0" stopColor="#4be0b0" stopOpacity=".24" />
-                    <stop offset="1" stopColor="#4be0b0" stopOpacity="0" />
-                  </linearGradient>
-                </defs>
-                <path
-                  d="M0 218 C55 211 60 180 115 190 S173 228 218 190 S265 164 306 176 S340 122 390 145 S450 188 493 151 S530 130 568 143 S610 100 645 120 S697 82 734 102 S785 90 820 60 S865 77 900 42 V280 H0Z"
-                  fill="url(#fill)"
-                />
-                <path
-                  d="M0 218 C55 211 60 180 115 190 S173 228 218 190 S265 164 306 176 S340 122 390 145 S450 188 493 151 S530 130 568 143 S610 100 645 120 S697 82 734 102 S785 90 820 60 S865 77 900 42"
-                  fill="none"
-                  stroke="#4be0b0"
-                  strokeWidth="3"
-                />
-              </svg>
-              <div className="axis-y">
-                <span>0.54</span>
-                <span>0.52</span>
-                <span>0.50</span>
-                <span>0.48</span>
-              </div>
-              <div className="axis-x">
-                <span>00:00</span>
-                <span>06:00</span>
-                <span>12:00</span>
-                <span>18:00</span>
-                <span>Now</span>
-              </div>
+          </div>
+          {state && <p className="endpoint">Source: {state.endpoint}</p>}
+        </aside>
+        {selected ? (
+          <Market
+            key={`${state?.network}:${pairKey(selected)}`}
+            pair={selected}
+            network={state?.network ?? 'unknown'}
+            ammStatus={statuses.get(pairKey(selected))}
+            ammCreation={state?.amm_creations?.find(
+              (creation) => pairKey(creation.pair) === pairKey(selected),
+            )}
+            networkStale={['offline', 'stale', 'reconnecting'].includes(
+              connection,
+            )}
+          />
+        ) : (
+          <section className="market-main">
+            <div className="panel welcome">
+              <p className="eyebrow">LIVE MARKET VIEW</p>
+              <h2>Your {state?.network ?? 'market'} workspace</h2>
+              <p>
+                Markets will appear as the service observes activity. Select a
+                pair or enter its currency and issuer to view both sides of its
+                order book.
+              </p>
+              <p>
+                No wallet is needed. Prices and charts appear only when real
+                quotes are available.
+              </p>
             </div>
-            <p className="chart-footnote">
-              Testnet data · Last update{' '}
-              {new Date(selected.quote.observed_at).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </p>
-          </div>
-
-          <div className="lower-grid">
-            <OrderBook market={selected} />
-            <Activity />
-          </div>
-        </section>
+          </section>
+        )}
       </main>
     </div>
   )
 }
 
-function MarketRow({
-  market,
-  selected,
-  onSelect,
+type Point = { value: number; at: string; ledger: number; gap: boolean }
+function Market({
+  pair,
+  network,
+  networkStale,
+  ammCreation,
+  ammStatus,
 }: {
-  market: MarketSummary
-  selected: boolean
-  onSelect: (market: MarketSummary) => void
+  pair: Pair
+  network: string
+  networkStale: boolean
+  ammCreation?: AMMCreation
+  ammStatus?: AMMStatus
 }) {
+  const [book, setBook] = useState<OrderBook>()
+  const [error, setError] = useState('')
+  const [points, setPoints] = useState<Point[]>([])
+  const [copied, setCopied] = useState(false)
+  const [clock, setClock] = useState(Date.now())
+  useEffect(() => {
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout>
+    let gap = false
+    const tick = setInterval(() => setClock(Date.now()), 1000)
+    async function refresh() {
+      try {
+        const params = new URLSearchParams({
+          currency: pair.quote.currency,
+          issuer: pair.quote.issuer!,
+        })
+        const next = await getJSON<OrderBook>(
+          `/api/v1/book?${params}`,
+          AbortSignal.any([controller.signal, AbortSignal.timeout(22000)]),
+        )
+        if (controller.signal.aborted) return
+        setBook(next)
+        setError('')
+        // Only chart coordinates use floating point; displayed prices stay strings.
+        const value = Number(next.quote.mid)
+        if (next.quote.mid && Number.isFinite(value) && value > 0) {
+          const discontinuity = gap
+          setPoints((current) =>
+            current.at(-1)?.ledger === next.ledger_index
+              ? current
+              : [
+                  ...current,
+                  {
+                    value,
+                    at: next.observed_at,
+                    ledger: next.ledger_index,
+                    gap: discontinuity,
+                  },
+                ].slice(-120),
+          )
+          gap = false
+        } else {
+          gap = true
+        }
+      } catch (cause) {
+        gap = true
+        if (!controller.signal.aborted)
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : 'Unable to load the order book.',
+          )
+      } finally {
+        if (!controller.signal.aborted) timer = setTimeout(refresh, 5000)
+      }
+    }
+    void refresh()
+    return () => {
+      controller.abort()
+      clearTimeout(timer)
+      clearInterval(tick)
+    }
+  }, [pair])
+  const age = book
+    ? Math.max(0, Math.floor((clock - Date.parse(book.observed_at)) / 1000))
+    : 0
+  const stale = networkStale || !!error || age > 20
+  async function copyIssuer() {
+    try {
+      await navigator.clipboard.writeText(pair.quote.issuer!)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
   return (
-    <button
-      className={`market-row ${selected ? 'selected' : ''}`}
-      type="button"
-      onClick={() => onSelect(market)}
+    <section
+      className="market-main"
+      aria-label={`${currencyLabel(pair.quote.currency)} market`}
     >
-      <span>
-        <strong>XRP / {market.symbol}</strong>
-        <small>{market.issuer}</small>
-      </span>
-      <span className="row-price">
-        <strong>{market.quote.mid}</strong>
-        <small className="positive">{market.change24h}</small>
-      </span>
-    </button>
+      <div className="market-header">
+        <div>
+          <div className="breadcrumb">
+            Markets / XRP / {currencyLabel(pair.quote.currency)}
+          </div>
+          <h2>
+            XRP <span className="muted-slash">/</span>{' '}
+            {currencyLabel(pair.quote.currency)}
+          </h2>
+          <p className="issuer">
+            Issuer{' '}
+            <code title={pair.quote.issuer}>
+              {shortIssuer(pair.quote.issuer ?? '')}
+            </code>{' '}
+            <button
+              className="copy-button"
+              type="button"
+              onClick={() => void copyIssuer()}
+              aria-label="Copy full issuer address"
+            >
+              {copied ? 'Copied' : 'Copy issuer'}
+            </button>
+          </p>
+          <details className="token-details">
+            <summary>Full token identifiers</summary>
+            <dl>
+              <dt>Currency</dt>
+              <dd>
+                <code>{pair.quote.currency}</code>
+              </dd>
+              <dt>Issuer</dt>
+              <dd>
+                <code>{pair.quote.issuer}</code>
+              </dd>
+            </dl>
+          </details>
+        </div>
+        <div className="price-summary">
+          <strong>{book?.quote.mid ?? '—'}</strong>
+          <small>{currencyLabel(pair.quote.currency)} per XRP</small>
+        </div>
+      </div>
+      {ammStatus?.state === 'active' && (
+        <p className="amm-notice">
+          Funded AMM confirmed at validated ledger #
+          {ammStatus.ledger_index?.toLocaleString()}. This screen shows the
+          order book; pool prices and reserves are not displayed yet.
+        </p>
+      )}
+      {ammCreation && ammStatus?.state !== 'active' && (
+        <p className="amm-notice">
+          AMM creation observed at ledger #
+          {ammCreation.ledger_index.toLocaleString()}. This view shows limit
+          offers; pool reserves and swap prices are not displayed yet.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="error-banner">
+          {error} Retrying automatically.{' '}
+          {book ? 'The last successful snapshot is shown below.' : ''}
+        </p>
+      )}
+      <div className="stat-row">
+        <Stat label="Best bid" value={book?.quote.bid ?? '—'} />
+        <Stat label="Best ask" value={book?.quote.ask ?? '—'} />
+        <Stat
+          label={`Spread (${currencyLabel(pair.quote.currency)})`}
+          value={book?.quote.spread ?? '—'}
+        />
+        <div className="live-state" role="status">
+          <span
+            className={`status-dot ${stale ? 'stale' : book ? 'connected' : 'connecting'}`}
+          />
+          {stale ? 'Stale' : book ? 'Snapshot' : 'Loading…'}
+        </div>
+      </div>
+      <div className="chart-card">
+        <div className="panel-heading">
+          <h3>Mid-price · this session</h3>
+          <span>{currencyLabel(pair.quote.currency)} / XRP</span>
+        </div>
+        <Chart points={points} />
+        <p className="chart-footnote">
+          Observed quotes, not trade candles or historical data. Up to 120
+          samples; gaps are not backfilled.
+        </p>
+      </div>
+      <div className="lower-grid">
+        <div className="panel">
+          <div className="panel-heading">
+            <h3>Order book</h3>
+            <span>
+              {book
+                ? `Ledger #${book.ledger_index.toLocaleString()}`
+                : 'Loading…'}
+            </span>
+          </div>
+          <div className="book-labels">
+            <span>PRICE ({currencyLabel(pair.quote.currency)})</span>
+            <span>FUNDED SIZE (XRP)</span>
+          </div>
+          <BookRows rows={book?.asks} side="ask" />
+          <div className="book-mid">
+            {book?.quote.mid ?? '—'} <span>mid</span>
+          </div>
+          <BookRows rows={book?.bids} side="bid" />
+          <p className="chart-footnote">
+            Up to 50 offers per side; showing the best 8. Display values rounded
+            to 16 significant digits.
+          </p>
+        </div>
+        <div className="panel">
+          <div className="panel-heading">
+            <h3>Snapshot details</h3>
+          </div>
+          <dl className="snapshot-details">
+            <dt>Network</dt>
+            <dd>{network.toUpperCase()} · read-only</dd>
+            <dt>Last fetched</dt>
+            <dd>
+              {book
+                ? `${time(book.observed_at)} (${age}s ago)`
+                : 'Waiting for data'}
+            </dd>
+            <dt>Book offers</dt>
+            <dd>
+              {book
+                ? `${book.bids.length} bids / ${book.asks.length} asks`
+                : '—'}
+            </dd>
+            <dt>Quote</dt>
+            <dd>
+              {book?.quote.mid
+                ? 'Midpoint of best bid and ask'
+                : 'A midpoint needs both a bid and an ask.'}
+            </dd>
+          </dl>
+          <p className="empty-state">
+            Wallets, trading, and trade history are not connected in this
+            read-only view.
+          </p>
+        </div>
+      </div>
+    </section>
   )
 }
-
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="stat">
@@ -241,84 +655,67 @@ function Stat({ label, value }: { label: string; value: string }) {
     </div>
   )
 }
-
-function OrderBook({ market }: { market: MarketSummary }) {
-  const asks = [
-    ['0.5131', '2,410'],
-    ['0.5130', '1,820'],
-    ['0.5129', '3,104'],
-  ]
-  const bids = [
-    ['0.5124', '4,810'],
-    ['0.5123', '2,260'],
-    ['0.5121', '5,032'],
-  ]
+function BookRows({ rows, side }: { rows?: BookLevel[]; side: 'ask' | 'bid' }) {
+  if (!rows) return <p className="empty-state">Waiting for {side}s…</p>
+  if (!rows.length)
+    return <p className="empty-state">No funded {side}s at this ledger.</p>
+  const shown = rows.slice(0, 8)
+  if (side === 'ask') shown.reverse()
   return (
-    <div className="panel">
-      <div className="panel-heading">
-        <h3>Order book</h3>
-        <span>Live · {market.quote.ledger_index.toLocaleString()}</span>
-      </div>
-      <div className="book-labels">
-        <span>PRICE (USD)</span>
-        <span>SIZE (XRP)</span>
-      </div>
-      <div className="book-rows">
-        {asks.map(([price, size]) => (
-          <div className="book-row ask" key={price}>
-            <span>{price}</span>
-            <span>{size}</span>
-          </div>
-        ))}
-        <div className="book-mid">
-          {market.quote.mid} <span>mid</span>
+    <div className="book-rows">
+      {shown.map((row, index) => (
+        <div
+          className={`book-row ${side}`}
+          key={`${row.owner}:${row.sequence}:${index}`}
+        >
+          <span>{row.price}</span>
+          <span>{row.size}</span>
         </div>
-        {bids.map(([price, size]) => (
-          <div className="book-row bid" key={price}>
-            <span>{price}</span>
-            <span>{size}</span>
-          </div>
-        ))}
-      </div>
+      ))}
     </div>
   )
 }
-
-function Activity() {
+function Chart({ points }: { points: Point[] }) {
+  if (points.length < 2)
+    return (
+      <div className="chart-empty">
+        {points.length
+          ? 'First quote received. Waiting for the next validated ledger…'
+          : 'Waiting for a two-sided book to start the chart.'}
+      </div>
+    )
+  const low = Math.min(...points.map((point) => point.value))
+  const high = Math.max(...points.map((point) => point.value))
+  const range = high - low || Math.abs(high) * 0.01 || 1
+  const start = Date.parse(points[0].at)
+  const duration = Date.parse(points.at(-1)!.at) - start || 1
+  const path = points
+    .map(
+      (point, index) =>
+        `${index === 0 || point.gap ? 'M' : 'L'}${20 + ((Date.parse(point.at) - start) / duration) * 860},${240 - ((point.value - low) / range) * 200}`,
+    )
+    .join(' ')
   return (
-    <div className="panel">
-      <div className="panel-heading">
-        <h3>Recent activity</h3>
-        <span>Validated</span>
+    <>
+      <svg
+        className="session-chart"
+        viewBox="0 0 900 280"
+        role="img"
+        aria-label={`Mid-price chart with ${points.length} observed quotes, from ${low} to ${high}`}
+      >
+        <path d={path} fill="none" stroke="#4be0b0" strokeWidth="3" />
+        <text x="20" y="20" fill="#a9bac9" fontSize="14">
+          {high.toPrecision(6)}
+        </text>
+        <text x="20" y="275" fill="#a9bac9" fontSize="14">
+          {low.toPrecision(6)}
+        </text>
+      </svg>
+      <div className="chart-times">
+        <span>{time(points[0].at)}</span>
+        <span>{time(points.at(-1)!.at)}</span>
       </div>
-      <div className="activity-list">
-        <div>
-          <span className="trade-dot buy" />
-          <span>
-            <strong>Buy</strong>
-            <small>Offer matched · 2 min ago</small>
-          </span>
-          <b>+1,240 XRP</b>
-        </div>
-        <div>
-          <span className="trade-dot sell" />
-          <span>
-            <strong>Sell</strong>
-            <small>Offer matched · 7 min ago</small>
-          </span>
-          <b>−680 XRP</b>
-        </div>
-        <div>
-          <span className="trade-dot buy" />
-          <span>
-            <strong>Buy</strong>
-            <small>Offer matched · 11 min ago</small>
-          </span>
-          <b>+420 XRP</b>
-        </div>
-      </div>
-    </div>
+    </>
   )
 }
-
 export default App

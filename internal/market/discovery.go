@@ -53,5 +53,5 @@ func parseAssetLabel(label string) (domain.Asset, error) {
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return domain.Asset{}, errors.New("invalid XRPL book asset label")
 	}
-	return domain.Issued(parts[1], parts[0]), nil
+	return domain.Asset{Currency: parts[1], Issuer: parts[0]}, nil
 }

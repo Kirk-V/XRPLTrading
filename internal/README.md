@@ -6,6 +6,7 @@ The current packages are organized by responsibility:
 - `config`: testnet-first endpoint and read-only safety configuration.
 - `xrpl`: replaceable read-only JSON-RPC/WebSocket protocol boundary.
 - `market`: pair discovery plus reconnecting book and validated-ledger ingestion.
+- `server`: read-only local HTTP application service and built frontend hosting.
 - `storage`: append-only local event journal with replay support.
 
-Planned packages for the next phases include the application service, wallet, order, and SQLite persistence layers. Boundaries and security expectations are described in [ARCHITECTURE.md](../ARCHITECTURE.md).
+Planned packages for the next phases include wallet, order, and SQLite persistence layers. Boundaries and security expectations are described in [ARCHITECTURE.md](../ARCHITECTURE.md).
