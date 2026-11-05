@@ -70,6 +70,11 @@ npm --prefix web run format
 go build -o bin/trader ./cmd/trader
 ```
 
+GitHub Actions runs the Go tests and build on Linux, Windows, and macOS, with
+the race detector on Linux. It also builds, lints, tests, and checks formatting
+for the web UI. The Go commands target project packages explicitly so installed
+frontend dependencies are not mistaken for part of this module.
+
 On Windows, use `go build -o bin/trader.exe ./cmd/trader`. Run from the repository root or pass `-web` so the binary can find the built UI.
 
 ## How market discovery works

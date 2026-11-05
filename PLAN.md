@@ -47,7 +47,7 @@ Do not begin with a cloud backend. It would add custody, authentication, uptime,
 - [x] Add network configuration with testnet and read-only mode as the safe default.
 - [x] Add a narrow, replaceable read-only XRPL client boundary.
 - [x] Add frontend workspace, linting, and formatting.
-- [ ] Add CI and cross-platform build checks.
+- [x] Add CI and cross-platform build checks.
 - [x] Expand versioned API schemas with `Quote`, `Candle`, `Wallet`, `Balance`, `Order`, and `Transaction`.
 - Decide on encrypted local storage and OS keychain/credential-manager integration.
 - Write threat model and transaction review UX before enabling signing.
@@ -69,7 +69,7 @@ Exit condition: a testnet user can select an XRP/token pair and see live updates
 ### Local development commands
 
 ```bash
-go test ./...
+go test ./api/... ./internal/... ./cmd/...
 go run ./cmd/trader
 go build -o bin/trader ./cmd/trader
 ```
@@ -138,7 +138,7 @@ Later, token ↔ token support should only require widening the pair filter and 
 
 ## First implementation tickets
 
-1. [x] Create Go and web workspace; CI matrix remains pending.
+1. [x] Create Go and web workspace with a Linux, Windows, and macOS CI matrix.
 2. [x] Add network config and a read-only XRPL client interface.
 3. [x] Implement asset/pair normalization with table-driven tests.
 4. [ ] Implement order-book snapshot plus streaming update reconciliation.
@@ -150,7 +150,7 @@ Later, token ↔ token support should only require widening the pair filter and 
 
 The UI now connects to a local read-only Go HTTP service. Run `npm --prefix web ci`, `npm --prefix web run build`, and `go run ./cmd/trader`, then open http://localhost:8080. It supports discovery from sampled validated ledgers on the selected network, search/manual currency-and-issuer selection, two-sided validated book snapshots, real connection/error/empty states, and session midpoint charts. Both book directions use the same ledger; funded quantities and prices use decimal-safe normalization. Adapter tests cover actual JSON-RPC envelopes, errors, empty books, and normalization.
 
-This first integration polls full snapshots about every five seconds; it does not consume the WebSocket ingestors or persist charts to the journal. Trading-activity discovery is sampled; AMM creation discovery uses the continuous stream described below. Both are session-only. Next steps are real WebSocket transaction reconciliation, ledger gap detection/backfill, durable aggregate storage, and a recorded integration harness. Do not enable wallet secrets or signing yet. CI and desktop packaging remain pending.
+This first integration polls full snapshots about every five seconds; it does not consume the WebSocket ingestors or persist charts to the journal. Trading-activity discovery is sampled; AMM creation discovery uses the continuous stream described below. Both are session-only. Next steps are real WebSocket transaction reconciliation, ledger gap detection/backfill, durable aggregate storage, and a recorded integration harness. Do not enable wallet secrets or signing yet. Desktop packaging remains pending.
 
 AMM discovery now listens continuously for successful validated XRP/token `AMMCreate` transactions, independently of sampled trading activity. The UI shows new pools and stream health, including interruption warnings. Reconnect/filtering/cancellation tests use mock WebSocket servers. Historical discovery backfill and AMM reserve/pricing views remain pending. Manual watches are still session-only and refresh only the selected market; a saved watchlist with background collection is a separate next step.
 

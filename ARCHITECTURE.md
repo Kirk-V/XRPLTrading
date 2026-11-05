@@ -108,7 +108,7 @@ The initial Go read models live under `api/v1`. They represent financial quantit
 From the repository root:
 
 ```bash
-go test ./...
+go test ./api/... ./internal/... ./cmd/...
 go run ./cmd/trader
 go build -o bin/trader ./cmd/trader
 ```

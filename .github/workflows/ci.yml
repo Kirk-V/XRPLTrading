@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: go test ./api/... ./internal/... ./cmd/...
+      - name: Build
+        run: go build ./api/... ./internal/... ./cmd/...
+      - name: Race test (Linux)
+        if: runner.os == 'Linux'
+        run: go test -race ./api/... ./internal/... ./cmd/...
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm --prefix web ci
+      - name: Build
+        run: npm --prefix web run build
+      - name: Lint
+        run: npm --prefix web run lint
+      - name: Test
+        run: npm --prefix web run test
+      - name: Format
+        run: npm --prefix web run format
